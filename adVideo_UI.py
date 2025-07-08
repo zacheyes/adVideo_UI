@@ -34,8 +34,8 @@ SCRIPT_FILENAMES = {
 # GitHub URLs for Python scripts (only for the relevant ones)
 GITHUB_SCRIPT_URLS = {
     GUI_SCRIPT_FILENAME: GITHUB_RAW_BASE_URL + GUI_SCRIPT_FILENAME,
-    "rename_video_files.py": GITHUB_RAW_BASE_URL + "rename_video_files.py",
-    "export_renamed_assets_to_csv.py": GITHUB_RAW_BASE_URL + "export_renamed_assets_to_csv.py",
+    "adVideo_renamer.py": GITHUB_RAW_BASE_URL + "adVideo_renamer.py",
+    "adVideo_metadataPrep.py": GITHUB_RAW_BASE_URL + "adVideo_metadataPrep.py",
 }
 
 # Use a specific config file for this video UI to avoid conflicts with the larger GUI
