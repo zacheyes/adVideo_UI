@@ -256,6 +256,7 @@ def main():
         entry["Ad ID"] = ad_id
         entry["Lead Offer Message"] = str(row.get("Lead Offer Message", "")).strip()
         entry["Lead Finance Message"] = str(row.get("Lead Finance Message", "")).strip()
+        entry["Partner"] = str(row.get("Partner", "")).strip()
         
         # Video Focus - derive from Ad Name
         video_focus = ad_name.split(" (Spanish)")[0].strip()
