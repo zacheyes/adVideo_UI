@@ -155,6 +155,15 @@ def main():
     allowed_exts = {"AI","CR2","CSS","DOC","DOCX","EPS","GIF","GLB","HTML","IDML","INDD","JFIF","JPEG","MOV","MP3","MP4","OTF","PDF","PNG","PPT", "WEBM", "AVI", "MKV"} # Added common video formats
     output_data = []
     
+    # Store expected filenames from the spreadsheet
+    expected_asset_filenames = set()
+    
+    # Get all current filenames in the assets folder
+    current_asset_filenames_in_folder = {f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))}
+    
+    # List to store files in folder that don't have a match in the spreadsheet
+    files_in_folder_without_spreadsheet_match = []
+
     total_rows = len(valid_rows)
     print(f"Total valid rows to process: {total_rows}")
 
@@ -171,9 +180,18 @@ def main():
             continue
 
         new_stem = f"{desc}-{ad_id}"
-        match_file = next((f for f in os.listdir(folder) if os.path.splitext(f)[0] == new_stem), None)
+        
+        # Find the actual file in the folder that matches the new_stem (case-sensitive check)
+        match_file = None
+        for f in current_asset_filenames_in_folder:
+            file_stem, file_ext = os.path.splitext(f)
+            if file_stem == new_stem:
+                match_file = f
+                expected_asset_filenames.add(f) # Add the *actual* matched filename to the expected set
+                break
+
         if not match_file:
-            print(f"No asset file found for '{new_stem}'. Skipping.")
+            print(f"No asset file found for expected name '{new_stem}.*' based on spreadsheet. Skipping row {idx+2}.")
             continue
         
         ext = os.path.splitext(match_file)[1].lstrip('.').upper()
@@ -199,30 +217,34 @@ def main():
         if "Ad Name" in row and isinstance(row["Ad Name"], str) and "(Animation)" in row["Ad Name"]:
             entry["Video Type"] = "Animation"
         else:
-            entry["Video Type"] = "Live Action" # CHECK ON THIS - Confirmed: Default to Live Action.
+            entry["Video Type"] = "Live Action" # Confirmed: Default to Live Action.
 
         # --- CLI arguments / UI inputs take precedence, then fallback to spreadsheet ---
         
         # Link to Wrike Project
-        if args.wrike_link:
+        # If CLI arg is provided and not empty, use it. Else, use spreadsheet.
+        if args.wrike_link is not None and args.wrike_link.strip() != "":
             entry["Link to Wrike Project"] = args.wrike_link
         else:
             entry["Link to Wrike Project"] = str(row.get("Link to Wrike Project", "")).strip()
 
         # Year
-        if args.year:
+        # If CLI arg is provided and not empty, use it. Else, use spreadsheet.
+        if args.year is not None and args.year.strip() != "":
             entry["Year"] = parse_year_from_value(args.year)
         else:
             entry["Year"] = parse_year_from_value(row.get("Year", ""))
 
         # Sub-Initiative
-        if args.sub_initiative:
+        # If CLI arg is provided and not empty, use it. Else, use spreadsheet.
+        if args.sub_initiative is not None and args.sub_initiative.strip() != "":
             entry["Sub-Initiative"] = args.sub_initiative
         else:
             entry["Sub-Initiative"] = str(row.get("Sub-Initiative", "")).strip()
         
         # Location Type
-        if args.location_type:
+        # If CLI arg is provided and not empty, use it. Else, use spreadsheet.
+        if args.location_type is not None and args.location_type.strip() != "":
             entry["Location Type"] = args.location_type
         else:
             entry["Location Type"] = str(row.get("Location Type", "")).strip()
@@ -259,11 +281,25 @@ def main():
 
         output_data.append(entry)
 
+    # After processing all rows, identify unmatched files in the folder
+    for filename in current_asset_filenames_in_folder:
+        if filename not in expected_asset_filenames:
+            files_in_folder_without_spreadsheet_match.append(filename)
+
     # Build DataFrame and export
     out_df = pd.DataFrame(output_data, columns=headers)
     out_df.to_csv(save_path, sep=';', index=False)
     print(f"Your Bynder metadata import CSV has been saved to {save_path}.")
-    print("Script finished.")
+
+    # Print the list of unmatched files
+    if files_in_folder_without_spreadsheet_match:
+        print("\n--- Files in folder without a match in the spreadsheet ---")
+        for filename in sorted(files_in_folder_without_spreadsheet_match):
+            print(f"- {filename}")
+    else:
+        print("\nAll files in the assets folder had a corresponding match in the spreadsheet.")
+
+    print("\nScript finished.")
 
 
 if __name__ == "__main__":
