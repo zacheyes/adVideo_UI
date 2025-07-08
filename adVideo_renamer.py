@@ -88,16 +88,17 @@ def main():
         print("No valid rows found (need non-empty in columns A, B, and C). Exiting.")
         return
 
-    # Counters for summary
+    # Initialize lists to store detailed information
     successful_renames = 0
-    missing_matches_count = 0
-    
-    # Keep track of the original stems of files in the folder and their new stems if renamed
-    # This helps accurately calculate unmatched files later
+    could_not_rename_files = [] # To store files that couldn't be renamed due to no match
+    files_in_folder_without_spreadsheet_match = [] # To store files in the folder not matched by any spreadsheet entry
+
+    # Get initial files in the folder to compare against later
+    initial_files_in_folder_full_paths = {os.path.join(folder, f) for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))}
     initial_files_in_folder_stems = {os.path.splitext(f)[0] for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))}
-    
-    # Use a set to store stems of files that *were successfully processed* (renamed or already correct)
-    processed_stems_from_spreadsheet = set()
+
+    # Keep track of the descriptions from the spreadsheet that successfully led to a rename
+    matched_spreadsheet_descriptions = set()
 
     total_rows = len(valid_rows)
     print(f"Total valid rows to process: {total_rows}")
@@ -112,12 +113,13 @@ def main():
 
         # Skip if Description or AD ID is empty (redundant with valid_rows filter, but safe)
         if not desc or not ad_id:
+            # This case should ideally not be hit due to `valid_rows` filter, but good for robustness.
             print(f"Row {idx+2}: Missing Description or AD ID. Skipping.")
-            missing_matches_count += 1
-            continue
+            continue # Don't count this as a file that couldn't be renamed from the folder's perspective
 
         new_stem = f"{desc}-{ad_id}"
         found_match_in_folder = False
+        original_filename_matched = None # To store the filename that was found and potentially renamed
 
         # Search for a matching file in the folder based on 'Description'
         for filename_in_folder in os.listdir(folder):
@@ -127,49 +129,90 @@ def main():
                 if stem_in_folder == desc:
                     src = os.path.join(folder, filename_in_folder)
                     dst = os.path.join(folder, new_stem + ext_in_folder)
+                    original_filename_matched = filename_in_folder # Store the original name
                     
                     if src != dst: # Only rename if the name actually changes
                         try:
                             os.rename(src, dst)
                             print(f"Renamed '{filename_in_folder}' to '{new_stem + ext_in_folder}'")
                             successful_renames += 1
-                            processed_stems_from_spreadsheet.add(new_stem) # Mark the new stem as processed
                             found_match_in_folder = True
+                            matched_spreadsheet_descriptions.add(desc) # Mark this description as matched
                             break # Move to next spreadsheet row
                         except Exception as e:
                             print(f"Error renaming '{filename_in_folder}': {e}")
-                            missing_matches_count += 1 # Count as a failed rename/match attempt
+                            could_not_rename_files.append(filename_in_folder) # Add to list of failed renames
                             found_match_in_folder = True # Treat as "attempted to match" to not double count later
                             break
                     else:
                         print(f"File '{filename_in_folder}' already has the target name. Skipping rename.")
                         successful_renames += 1 # Count as success if already correctly named
-                        processed_stems_from_spreadsheet.add(new_stem)
                         found_match_in_folder = True
+                        matched_spreadsheet_descriptions.add(desc)
                         break # Move to next spreadsheet row
 
         if not found_match_in_folder:
-            print(f"No file found for Description '{desc}'.")
-            missing_matches_count += 1
+            # This means the 'Description' from the spreadsheet didn't find any file in the folder
+            could_not_rename_files.append(f"No file found in folder for Description: '{desc}' from spreadsheet")
 
-    # --- Original Summary Output Format ---
-    total_files_in_folder_at_start = len(initial_files_in_folder_stems)
+    # --- Final Summary Output ---
     
-    # Calculate files that were in the folder but were not matched by any 'Description' value
-    # This is tricky because a file might have been renamed.
-    # The most accurate way to get "unmatched files in folder" is to list files *after* renaming
-    # and compare them to the set of target names (`new_stem`) that were successfully created.
+    # Calculate files in the folder that were not matched by any 'Description' value from the spreadsheet
+    # We iterate through the initial files in the folder and check if their stem was ever a 'Description'
+    # that led to a successful match.
+    
+    # Get the current list of files in the folder after all renames
+    current_files_in_folder_stems = {os.path.splitext(f)[0] for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))}
 
-    final_files_in_folder_stems = {os.path.splitext(f)[0] for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))}
+    # Files that were in the folder at the start and whose stem *was not* a 'Description' that led to a match
+    # or whose new name doesn't match any target new_stem from the spreadsheet
+    
+    # The most robust way is to compare the *initial* set of files in the folder against all 'Description' values
+    # in the spreadsheet (regardless of whether they were successfully renamed or not, just if a match was attempted).
+    
+    # Collect all 'Description' values from the spreadsheet
+    all_spreadsheet_descriptions = {str(row.get("Description", "")).strip() for _, row in valid_rows.iterrows() if str(row.get("Description", "")).strip()}
 
-    # Unmatched files in the folder = files whose current stem is not in the set of successful target stems
-    unmatched_folder_files_count = len(final_files_in_folder_stems) - successful_renames
-    # Note: this counts files that were already named correctly as "matched".
+    for filename_in_folder in initial_files_in_folder_full_paths:
+        stem_in_folder, _ = os.path.splitext(os.path.basename(filename_in_folder))
+        if stem_in_folder not in all_spreadsheet_descriptions and \
+           f"{stem_in_folder}" not in matched_spreadsheet_descriptions: # Check if the initial stem or its new stem was successfully renamed
+            
+            # We need to be careful here: if a file was renamed from "old_name.mp4" to "new_name-ADID.mp4",
+            # then "old_name" was a match. We only want to list files whose *original* name (stem)
+            # was never found in the spreadsheet's 'Description' column, *and* wasn't successfully renamed.
+            
+            # This means if a file "video.mp4" was in the folder, and "video" was in the spreadsheet
+            # and got renamed, it shouldn't be counted as "unmatched".
+            # The current `matched_spreadsheet_descriptions` only tracks the `desc` that *led to* a rename.
 
-    print(f"{successful_renames} video files were successfully renamed. ")
-    print(f"{missing_matches_count} video files couldn't be renamed because there was no file found matching Description value in spreadsheet. ")
-    print(f"There were {unmatched_folder_files_count} files in your folder that don't have a match in your spreadsheet. See activity log for details.")
-    print("Script finished.")
+            # A simpler approach for "files in your folder that don't have a match in your spreadsheet":
+            # Compare the initial list of file stems in the folder with the set of all 'Description' values
+            # present in the valid rows of the spreadsheet.
+            if stem_in_folder not in all_spreadsheet_descriptions:
+                files_in_folder_without_spreadsheet_match.append(os.path.basename(filename_in_folder))
+
+
+    print("\n--- Script Summary ---")
+    print(f"{successful_renames} video files were successfully renamed.")
+
+    if could_not_rename_files:
+        print(f"\n{len(could_not_rename_files)} video files couldn't be renamed because there was no file found matching Description value in spreadsheet or an error occurred during renaming:")
+        for file_info in could_not_rename_files:
+            print(f"- {file_info}")
+    else:
+        print("\n0 video files couldn't be renamed due to missing matches or errors.")
+
+    if files_in_folder_without_spreadsheet_match:
+        # Remove duplicates if any (e.g., if a file was moved/deleted mid-script, though unlikely with os.rename)
+        files_in_folder_without_spreadsheet_match = sorted(list(set(files_in_folder_without_spreadsheet_match)))
+        print(f"\nThere were {len(files_in_folder_without_spreadsheet_match)} files in your folder that don't have a match in your spreadsheet:")
+        for file_name in files_in_folder_without_spreadsheet_match:
+            print(f"- {file_name}")
+    else:
+        print("\nAll files in your folder had a corresponding match in your spreadsheet.")
+
+    print("\nScript finished.")
 
 
 if __name__ == "__main__":
