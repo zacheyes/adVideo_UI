@@ -949,20 +949,9 @@ class AdVideoApp:
             messagebox.showerror("Input Error", "Please select a valid Folder of Renamed Assets (Videos).")
             return
         
-        # --- Make these four fields required ---
-        if not wrike_link:
-            messagebox.showerror("Input Error", "The 'Link to Wrike Project' field is required.")
-            return
-        if not year:
-            messagebox.showerror("Input Error", "The 'Year' field is required.")
-            return
-        if not sub_initiative:
-            messagebox.showerror("Input Error", "The 'Sub-Initiative' field is required.")
-            return
-        if not location_type:
-            messagebox.showerror("Input Error", "The 'Location Type' field is required.")
-            return
-        # --- End of required field checks ---
+        # --- Removed required field checks for Link to Wrike Project, Year, Sub-Initiative, and Location Type ---
+        # The script will now pass empty strings if the UI fields are empty, allowing the backend script
+        # to fall back to spreadsheet values as designed.
 
         self.log_print(f"\n--- Running Bynder Video Metadata Export Script ({script_name}) ---")
         self.log_print(f"Spreadsheet: {spreadsheet_path}")
@@ -972,12 +961,18 @@ class AdVideoApp:
         args = [
             "--spreadsheet", spreadsheet_path,
             "--assets_folder", folder_path,
-            "--wrike_link", wrike_link,
-            "--year", year,
-            "--sub_initiative", sub_initiative,
-            "--location_type", location_type
         ]
         
+        # Only add arguments if they have a non-empty value from the UI
+        if wrike_link:
+            args.extend(["--wrike_link", wrike_link])
+        if year:
+            args.extend(["--year", year])
+        if sub_initiative:
+            args.extend(["--sub_initiative", sub_initiative])
+        if location_type:
+            args.extend(["--location_type", location_type])
+            
         self.run_bynder_video_metadata_export_button.config(state='disabled')
         _prepare_progress_ui(self.bynder_video_metadata_export_progress_bar, self.bynder_video_metadata_export_progress_label,
                              self.bynder_video_metadata_export_run_button_wrapper, self.bynder_video_metadata_export_progress_wrapper,
@@ -1192,21 +1187,21 @@ class AdVideoApp:
         # --- NEW UI Elements for additional metadata fields ---
         ttk.Label(bynder_video_metadata_frame, text="Link to Wrike Project:", style='TLabel').grid(row=2, column=0, padx=5, pady=5, sticky="w")
         ttk.Entry(bynder_video_metadata_frame, textvariable=self.link_to_wrike_project_ui, width=45, style='TEntry').grid(row=2, column=1, padx=5, pady=5, sticky="ew", columnspan=2)
-        Tooltip(bynder_video_metadata_frame.winfo_children()[-1], "Enter a Wrike project link to apply to all assets. This field is now required.", self.secondary_bg, self.text_color)
+        Tooltip(bynder_video_metadata_frame.winfo_children()[-1], "Enter a Wrike project link to apply to all assets. If left blank, the script will attempt to use the value from the spreadsheet, if available.", self.secondary_bg, self.text_color)
 
         ttk.Label(bynder_video_metadata_frame, text="Year:", style='TLabel').grid(row=3, column=0, padx=5, pady=5, sticky="w")
         year_combobox = ttk.Combobox(bynder_video_metadata_frame, textvariable=self.year_ui, values=self.available_years, state="readonly", width=10, style='TCombobox')
         year_combobox.grid(row=3, column=1, padx=5, pady=5, sticky="w", columnspan=2)
-        Tooltip(year_combobox, "Select the year to apply to all assets. This field is now required.", self.secondary_bg, self.text_color)
+        Tooltip(year_combobox, "Select the year to apply to all assets. If left blank, the script will attempt to use the value from the spreadsheet, if available.", self.secondary_bg, self.text_color)
 
         ttk.Label(bynder_video_metadata_frame, text="Sub-Initiative:", style='TLabel').grid(row=4, column=0, padx=5, pady=5, sticky="w")
         ttk.Entry(bynder_video_metadata_frame, textvariable=self.sub_initiative_ui, width=45, style='TEntry').grid(row=4, column=1, padx=5, pady=5, sticky="ew", columnspan=2)
-        Tooltip(bynder_video_metadata_frame.winfo_children()[-1], "Enter the Sub-Initiative to apply to all assets. This field is now required.", self.secondary_bg, self.text_color)
+        Tooltip(bynder_video_metadata_frame.winfo_children()[-1], "Enter the Sub-Initiative to apply to all assets. If left blank, the script will attempt to use the value from the spreadsheet, if available.", self.secondary_bg, self.text_color)
 
         ttk.Label(bynder_video_metadata_frame, text="Location Type:", style='TLabel').grid(row=5, column=0, padx=5, pady=5, sticky="w")
         location_type_combobox = ttk.Combobox(bynder_video_metadata_frame, textvariable=self.location_type_ui, values=self.location_type_options, state="readonly", width=30, style='TCombobox')
         location_type_combobox.grid(row=5, column=1, padx=5, pady=5, sticky="w", columnspan=2)
-        Tooltip(location_type_combobox, "Select the Location Type to apply to all assets. This field is now required.", self.secondary_bg, self.text_color)
+        Tooltip(location_type_combobox, "Select the Location Type to apply to all assets. If left blank, the script will attempt to use the value from the spreadsheet, if available.", self.secondary_bg, self.text_color)
 
         # Run button and progress bar
         self.bynder_video_metadata_export_run_control_frame = ttk.Frame(bynder_video_metadata_frame, style='TFrame')
