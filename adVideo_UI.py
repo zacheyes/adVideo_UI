@@ -791,66 +791,78 @@ class AdVideoApp:
         self._save_configuration()
 
     def _check_for_gui_update(self):
-        """Checks for a new version of the GUI script and updates/restarts if available."""
-        self.log_print("\n--- Checking for GUI script update ---")
-        local_gui_path = os.path.abspath(sys.argv[0])
-        github_url = GITHUB_SCRIPT_URLS.get(GUI_SCRIPT_FILENAME)
-        
-        if not github_url:
-            self.log_print("Error: GUI script URL not found in configuration.", is_stderr=True)
-            messagebox.showerror("Update Error", "GUI script URL not configured.")
-            return
-
-        temp_download_path = local_gui_path + ".new_version_tmp"
-
-        try:
-            self.log_print(f"Downloading latest GUI from: {github_url}")
-            response = requests.get(github_url, stream=True)
-            response.raise_for_status()
-
-            with open(temp_download_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+            """Checks for a new version of the GUI script and updates/restarts if available."""
+            self.log_print("\n--- Checking for GUI script update ---")
+            local_gui_path = os.path.abspath(sys.argv[0])
+            github_url = GITHUB_SCRIPT_URLS.get(GUI_SCRIPT_FILENAME)
             
-            if os.path.exists(local_gui_path) and filecmp.cmp(local_gui_path, temp_download_path, shallow=False):
-                self.log_print("GUI script is already up to date.\n")
-                os.remove(temp_download_path)
-                messagebox.showinfo("Update Check", "The GUI is already up to date!")
+            if not github_url:
+                self.log_print("Error: GUI script URL not found in configuration.", is_stderr=True)
+                messagebox.showerror("Update Error", "GUI script URL not configured.")
                 return
-            else:
-                self.log_print("New version of GUI script found. Applying update...")
+
+            temp_download_path = local_gui_path + ".new_version_tmp"
+
+            try:
+                self.log_print(f"Downloading latest GUI from: {github_url}")
+                response = requests.get(github_url, stream=True)
+                response.raise_for_status()
+
+                # Read content from the response and write it to a temporary file
+                downloaded_content = response.content
+                with open(temp_download_path, 'wb') as f:
+                    f.write(downloaded_content)
                 
-                with open(UPDATE_IN_PROGRESS_MARKER, 'w') as f:
-                    f.write(str(os.getpid()))
+                # If the local file exists, compare its content with the downloaded content
+                gui_updated = False
+                if os.path.exists(local_gui_path):
+                    # You can read the local file content and compare
+                    with open(local_gui_path, 'rb') as f:
+                        local_content = f.read()
+                    
+                    # Check for content equality directly
+                    if local_content == downloaded_content:
+                        self.log_print("GUI script is already up to date. No update needed.\n")
+                        messagebox.showinfo("Update Check", "The GUI is already up to date!")
+                    else:
+                        self.log_print("New version of GUI script found. Applying update...")
+                        shutil.copy(temp_download_path, local_gui_path)
+                        gui_updated = True
+                else:
+                    # Local file doesn't exist, so it's a new download
+                    self.log_print("GUI script not found locally. Downloading new script...")
+                    shutil.copy(temp_download_path, local_gui_path)
+                    gui_updated = True
 
-                shutil.copy(temp_download_path, local_gui_path)  
-                os.remove(temp_download_path)
+                if gui_updated:
+                    # Marker file for successful update and restart
+                    with open(UPDATE_IN_PROGRESS_MARKER, 'w') as f:
+                        f.write(str(os.getpid()))
 
-                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                self.gui_last_update_timestamp.set(f"Last GUI update: {current_time}")
-                self._save_configuration()
+                    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.gui_last_update_timestamp.set(f"Last GUI update: {current_time}")
+                    self._save_configuration()
 
-                self.log_print("GUI script updated successfully. Restarting application...\n")
-
-                messagebox.showinfo("Update Complete", "The GUI has been updated. The application will now restart to apply changes.")
+                    self.log_print("GUI script updated successfully. Restarting application...\n")
+                    messagebox.showinfo("Update Complete", "The GUI has been updated. The application will now restart to apply changes.")
+                    
+                    self._restarting_for_update = True
+                    python = sys.executable
+                    os.execl(python, python, *sys.argv)
                 
-                self._restarting_for_update = True
-                
-                python = sys.executable
-                os.execl(python, python, *sys.argv)  
-            
-        except requests.exceptions.RequestException as e:
-            self.log_print(f"Error checking/downloading GUI update: {e}\n", is_stderr=True)
-            messagebox.showerror("Update Error", f"Failed to check for GUI update: {e}")
-        except Exception as e:
-            self.log_print(f"An unexpected error occurred during GUI update: {e}\n", is_stderr=True)
-            messagebox.showerror("Update Error", f"An unexpected error occurred: {e}")
-        finally:
-            if os.path.exists(temp_download_path):
-                try:
-                    os.remove(temp_download_path)
-                except Exception as e:
-                    self.log_print(f"Warning: Could not remove temporary download file: {e}", is_stderr=True)
+            except requests.exceptions.RequestException as e:
+                self.log_print(f"Error checking/downloading GUI update: {e}\n", is_stderr=True)
+                messagebox.showerror("Update Error", f"Failed to check for GUI update: {e}")
+            except Exception as e:
+                self.log_print(f"An unexpected error occurred during GUI update: {e}\n", is_stderr=True)
+                messagebox.showerror("Update Error", f"An unexpected error occurred: {e}")
+            finally:
+                # Always clean up the temporary file
+                if os.path.exists(temp_download_path):
+                    try:
+                        os.remove(temp_download_path)
+                    except Exception as e:
+                        self.log_print(f"Warning: Could not remove temporary download file: {e}", is_stderr=True)
 
     # --- This method was missing and caused the AttributeError ---
     def _handle_startup_update_check(self):
