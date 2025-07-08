@@ -90,9 +90,10 @@ def main():
     # Read the spreadsheet into a DataFrame
     try:
         if file_path.lower().endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(file_path)
+            # Using keep_default_na=False and na_values=[] to prevent pandas from interpreting empty cells as NaN
+            df = pd.read_excel(file_path, keep_default_na=False, na_values=[])
         else: # Assume CSV if not Excel
-            df = pd.read_csv(file_path)
+            df = pd.read_csv(file_path, keep_default_na=False, na_values=[])
     except Exception as e:
         print(f"Error reading spreadsheet: {e}")
         sys.exit(1)
@@ -107,10 +108,12 @@ def main():
     required_cols = df.columns[:3].tolist()
     
     # Convert all required columns to string before dropping NA to ensure empty strings are handled
+    # It's good practice to ensure these are strings early on if they're used for string comparisons
     for col in required_cols:
-        df[col] = df[col].astype(str).replace('nan', '').str.strip()
+        df[col] = df[col].astype(str).str.strip()
 
     # Drop rows where any of the first three columns are empty after stripping
+    # Here, we specifically look for empty strings, which is what we get from `keep_default_na=False`
     valid_rows = df[df[required_cols].ne('').all(axis=1)]
 
 
@@ -168,6 +171,7 @@ def main():
     print(f"Total valid rows to process: {total_rows}")
 
     for i, (idx, row) in enumerate(valid_rows.iterrows()):
+        # Retrieve values using .get and ensure they are stripped strings, defaulting to ""
         desc = str(row.get("Description", "")).strip()
         ad_id = str(row.get("AD ID", "")).strip()
         
@@ -199,7 +203,7 @@ def main():
         spot = str(row.get("Spot Running", "")).strip()
         ad_name = str(row.get("Ad Name", "")).strip()
 
-        entry = {h: "" for h in headers}
+        entry = {h: "" for h in headers} # Initialize all values to empty string
         entry["filename"] = match_file
         entry["File Type"] = file_type
         
@@ -287,8 +291,13 @@ def main():
         if filename not in expected_asset_filenames:
             files_in_folder_without_spreadsheet_match.append(filename)
 
-    # Build DataFrame and export
+    # Build DataFrame
     out_df = pd.DataFrame(output_data, columns=headers)
+    
+    # *** KEY CHANGE: Replace any remaining NaN values with empty strings before saving ***
+    out_df = out_df.fillna('')
+
+    # Export to CSV
     out_df.to_csv(save_path, sep=';', index=False)
     print(f"Your Bynder metadata import CSV has been saved to {save_path}.")
 
