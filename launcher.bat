@@ -17,7 +17,7 @@ if %errorlevel% neq 0 (
 
 :: --- 2. Install required packages directly ---
 echo Installing required packages (if missing)...
-pip install pandas openpyxl requests --upgrade --quiet --disable-pip-version-check
+pip install pandas openpyxl requests --quiet --disable-pip-version-check
 
 :: --- 3. Launch the UI and Exit ---
 echo Launching the Ad Video Tool...
