@@ -3,7 +3,7 @@ from tkinter import filedialog, scrolledtext, ttk, messagebox
 import os
 import subprocess
 import shutil
-from datetime import datetime # Corrected import based on previous error
+from datetime import datetime
 import sys
 import json
 import tkinter.font as tkFont
@@ -11,6 +11,8 @@ import requests
 import filecmp
 import threading
 import pandas as pd
+import stat # Import the 'stat' module for setting file permissions
+import zipfile # MODIFIED: Added for zip file extraction
 
 # --- Configuration ---
 # Define your GitHub repository details
@@ -25,19 +27,21 @@ GITHUB_RAW_BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_USERNAME}/{GIT
 GUI_SCRIPT_FILENAME = "adVideo_UI.py"
 UPDATE_IN_PROGRESS_MARKER = "adVideo_ui_update_in_progress.tmp"
 
-# Only include the two video scripts in this UI
+# --- MODIFIED: Changed Mac launcher to launcher.zip ---
 SCRIPT_FILENAMES = {
     "Video Renamer Script": "adVideo_renamer.py",
     "Bynder Video Metadata Export Script": "adVideo_metadataPrep.py",
-    "Launcher": "launcher.bat",
+    "Windows Launcher": "launcher.bat",
+    "Mac Launcher": "launcher.zip", # MODIFIED for macOS
 }
 
-# GitHub URLs for Python scripts (only for the relevant ones)
+# --- MODIFIED: Changed URL to point to launcher.zip ---
 GITHUB_SCRIPT_URLS = {
     GUI_SCRIPT_FILENAME: GITHUB_RAW_BASE_URL + GUI_SCRIPT_FILENAME,
     "adVideo_renamer.py": GITHUB_RAW_BASE_URL + "adVideo_renamer.py",
     "adVideo_metadataPrep.py": GITHUB_RAW_BASE_URL + "adVideo_metadataPrep.py",
     "launcher.bat": GITHUB_RAW_BASE_URL + "launcher.bat",
+    "launcher.zip": GITHUB_RAW_BASE_URL + "launcher.zip", # MODIFIED for macOS
 }
 
 # Use a specific config file for this video UI to avoid conflicts with the larger GUI
@@ -74,24 +78,22 @@ def _update_progress_ui(progress_bar, progress_label, value, total_items=None):
         progress_bar['value'] = percent
         progress_label.config(text=f"{percent:.1f}% ({value}/{total_items})")
     else:
-        # Fallback if total items is not available or is 0
         progress_bar['value'] = value
         progress_label.config(text=f"{value:.1f}%")
 
-    progress_bar.update_idletasks() # Force UI update
+    progress_bar.update_idletasks()
 
 def _on_process_complete_with_progress_ui(success, full_output, progress_bar, progress_label, run_button_wrapper, progress_wrapper, success_callback, error_callback, log_output_widget):
     if progress_bar:
         progress_bar.stop()
-        progress_bar.config(mode="determinate", value=0) # Reset to 0 and determinate mode
+        progress_bar.config(mode="determinate", value=0)
     if progress_label:
         progress_label.config(text="")
     
-    # Hide progress, show run button (assuming they are in column 1 of their respective parents)
     if progress_wrapper:
         progress_wrapper.grid_remove()
     if run_button_wrapper:
-        run_button_wrapper.grid(row=0, column=1) # Restore to original position
+        run_button_wrapper.grid(row=0, column=1)
 
     if progress_bar and progress_bar.winfo_toplevel():
         progress_bar.winfo_toplevel().config(cursor="")
@@ -104,7 +106,6 @@ def _on_process_complete_with_progress_ui(success, full_output, progress_bar, pr
         log_output_widget.insert(tk.END, "\nScript failed. Please check the log above for errors.\n", 'error')
     log_output_widget.see(tk.END)
     
-    # Call callbacks only after UI is reset
     if success:
         if success_callback:
             success_callback(full_output)
@@ -144,7 +145,6 @@ def _run_script_with_progress(script_full_path, args, log_output_widget, progres
                     log_output_widget.after(0, lambda log=log_output_widget, l=line: _append_to_log(log, l, is_stderr))
                     if line.startswith("PROGRESS:"):
                         try:
-                            # Expecting "PROGRESS: <value>/<total>" or "PROGRESS: <percent_float>"
                             parts = line.split("PROGRESS:")[1].strip().split('/')
                             if len(parts) == 2:
                                 value = float(parts[0])
@@ -152,7 +152,7 @@ def _run_script_with_progress(script_full_path, args, log_output_widget, progres
                                 progress_bar.after(0, lambda pb=progress_bar, pl=progress_label, val=value, tot=total: _update_progress_ui(pb, pl, val, tot))
                             else:
                                 percent_val = float(parts[0])
-                                progress_bar.after(0, lambda pb=progress_bar, pl=progress_label, val=percent_val: _update_progress_ui(pb, pl, val, 100)) # Treat as percentage if only one value
+                                progress_bar.after(0, lambda pb=progress_bar, pl=progress_label, val=percent_val: _update_progress_ui(pb, pl, val, 100))
                         except ValueError:
                             print(f"DEBUG (UI): Could not parse progress: {line.strip()}", file=sys.stderr)
                 stream.close()
@@ -169,7 +169,6 @@ def _run_script_with_progress(script_full_path, args, log_output_widget, progres
             process.wait()
             success = (process.returncode == 0)
             full_output = "".join(stdout_buffer) + "".join(stderr_buffer)
-            # Ensure after call is on the main thread for UI updates
             log_output_widget.after(0, lambda: _on_process_complete_with_progress_ui(success, full_output, progress_bar, progress_label, run_button_wrapper, progress_wrapper, success_callback, error_callback, log_output_widget))
 
         except FileNotFoundError:
@@ -253,20 +252,27 @@ def run_script_wrapper(script_full_path, is_python_script, args=None, log_output
         if progress_bar is not None and progress_label is not None and \
            run_button_wrapper is not None and progress_wrapper is not None:
             return _run_script_with_progress(script_full_path, args, log_output_widget,
-                                             progress_bar, progress_label, run_button_wrapper,
-                                             progress_wrapper, success_callback, error_callback,
-                                             initial_progress_text)
+                                              progress_bar, progress_label, run_button_wrapper,
+                                              progress_wrapper, success_callback, error_callback,
+                                              initial_progress_text)
         else:
             return _run_script_no_progress(script_full_path, args, log_output_widget,
-                                             success_callback, error_callback)
+                                           success_callback, error_callback)
     else:
         _append_to_log(log_output_widget, f"Opening file: {script_full_path}\n")
         try:
             if sys.platform == "win32":
                 os.startfile(script_full_path)
             elif sys.platform == "darwin": # macOS
+                # --- Ensure script is executable before opening on Mac ---
+                if script_full_path.endswith('.sh'):
+                    st = os.stat(script_full_path)
+                    os.chmod(script_full_path, st.st_mode | stat.S_IEXEC)
                 subprocess.Popen(["open", script_full_path])
             else: # Linux and other Unix-like
+                if script_full_path.endswith('.sh'):
+                    st = os.stat(script_full_path)
+                    os.chmod(script_full_path, st.st_mode | stat.S_IEXEC)
                 subprocess.Popen(["xdg-open", script_full_path])
             _append_to_log(log_output_widget, f"  File opened.\n")
             return True, f"Opened file: {script_full_path}"
@@ -301,7 +307,7 @@ class Tooltip:
         self.tooltip_window.wm_geometry(f"+{self.x}+{self.y}")
 
         label = ttk.Label(self.tooltip_window, text=self.text, background=self.bg_color, relief=tk.SOLID, borderwidth=1,
-                                     font=("Arial", 11), foreground=self.text_color, wraplength=400)
+                                          font=("Arial", 11), foreground=self.text_color, wraplength=400)
         label.pack(padx=5, pady=5)
 
     def hide_tooltip(self, event=None):
@@ -315,7 +321,7 @@ class AdVideoApp:
     def __init__(self, master):
         self.master = master
         master.title("Raymour & Flanigan Ad Video Tool")
-        master.geometry("700x650") # Adjusted geometry for new inputs
+        master.geometry("700x650")
         master.resizable(True, True)  
 
         self.current_theme = tk.StringVar(value="Light")
@@ -335,31 +341,29 @@ class AdVideoApp:
         self.last_update_timestamp = tk.StringVar(value="Last update: Never")
         self.gui_last_update_timestamp = tk.StringVar(value="Last GUI update: Never")
         
-        # --- Variables for Video Renamer and Bynder Video Metadata Export ---
         self.video_renamer_spreadsheet_path = tk.StringVar(value="")
         self.video_renamer_folder_path = tk.StringVar(value="")
 
         self.bynder_video_metadata_spreadsheet_path = tk.StringVar(value="")
         self.bynder_video_metadata_folder_path = tk.StringVar(value="")
 
-        # --- NEW: UI variables for Bynder Metadata fields ---
         self.link_to_wrike_project_ui = tk.StringVar(value="")
-        # Pre-populate Year dropdown with current year +/- a few, and an empty option for "fallback to matrix"
-        current_year = datetime.now().year # Corrected datetime.now() call
+        current_year = datetime.now().year
         self.available_years = [""] + [str(y) for y in range(current_year - 2, current_year + 3)]
-        self.year_ui = tk.StringVar(value="") # Empty string for 'fallback to matrix'
+        self.year_ui = tk.StringVar(value="")
         
         self.sub_initiative_ui = tk.StringVar(value="")
         self.location_type_options = ["", "Clearance Center", "Corporate Location", "Customer Service Center (CSC)", "Distribution Center", "Full Line", "Hybrid", "Outlet"]
-        self.location_type_ui = tk.StringVar(value="") # Empty string for 'fallback to matrix'
+        self.location_type_ui = tk.StringVar(value="")
 
 
-        self.log_expanded = False # Keep this for the log pane
+        self.log_expanded = False
 
         self._create_widgets()
         self._load_configuration()
 
         self.log_print(f"UI launched with Python {sys.version.split(' ')[0]} from: {sys.executable}\n")
+        self.log_print(f"Operating System: {sys.platform}\n")
         self.log_print("Ad Video Tool initialized. Please select paths and run operations.\n")
 
         self.master.after(100, self._handle_startup_update_check)
@@ -459,7 +463,7 @@ class AdVideoApp:
             self.checkbox_hover_bg = "#505050"  
             self.radiobutton_hover_bg = "#505050"
 
-        else:
+        else: # Light Theme
             self.primary_bg = "#F0F0F0"  
             self.secondary_bg = "#FFFFFF"  
             self.text_color = "#333333"  
@@ -563,7 +567,7 @@ class AdVideoApp:
 
         self.style.configure('TSeparator', background=self.border_color, relief='solid', sashrelief='solid', sashwidth=3)
         self.style.layout('TSeparator',
-                                 [('TSeparator.separator', {'sticky': 'nswe'})])
+                                [('TSeparator.separator', {'sticky': 'nswe'})])
 
         self.style.configure('TCombobox',
                              fieldbackground=self.secondary_bg,  
@@ -579,9 +583,9 @@ class AdVideoApp:
 
         if hasattr(self, 'log_text'):
             self.log_text.config(bg=self.log_bg, fg=self.log_text_color,
-                                     insertbackground=self.log_text_color,
-                                     selectbackground=self.accent_color,
-                                     selectforeground=self.RF_WHITE_BASE)
+                                 insertbackground=self.log_text_color,
+                                 selectbackground=self.accent_color,
+                                 selectforeground=self.RF_WHITE_BASE)
             self.log_text.tag_config('error', foreground='#FF6B6B')
             self.log_text.tag_config('success', foreground='#6BFF6B')
         
@@ -622,9 +626,9 @@ class AdVideoApp:
                 widget.config(bg=self.primary_bg)
             elif isinstance(widget, scrolledtext.ScrolledText):
                 widget.config(bg=self.log_bg, fg=self.log_text_color,
-                                     insertbackground=self.log_text_color,
-                                     selectbackground=self.accent_color,
-                                     selectforeground=self.RF_WHITE_BASE)
+                              insertbackground=self.log_text_color,
+                              selectbackground=self.accent_color,
+                              selectforeground=self.RF_WHITE_BASE)
 
         except tk.TclError:
             pass  
@@ -663,14 +667,7 @@ class AdVideoApp:
             string_var.set(folder_path)
 
     def _browse_file(self, string_var, file_type):
-        if file_type == "xlsx":
-            file_types = [("Excel files", "*.xlsx"), ("All files", "*.*")]
-        elif file_type == "csv":
-            file_types = [("CSV files", "*.csv"), ("All files", "*.*")]
-        elif file_type == "txt":
-            file_types = [("Text files", "*.txt"), ("All files", "*.*")]
-        # Allow both xlsx and csv for spreadsheet inputs
-        elif file_type == "spreadsheet":
+        if file_type == "spreadsheet":
             file_types = [("Spreadsheet files", "*.xlsx *.xls *.csv"), ("All files", "*.*")]
         else:
             file_types = [("All files", "*.*")]
@@ -680,13 +677,39 @@ class AdVideoApp:
             string_var.set(file_path)
 
     def _ensure_dir(self, path):
-        """Ensures the directory for a given path exists. If path is a file, it ensures its parent directory exists."""
-        directory = os.path.dirname(path) if os.path.isfile(path) or (os.path.basename(path) and '.' in os.path.basename(path)) else path
-            
+        """Ensures the directory for a given path exists."""
+        directory = os.path.dirname(path) if os.path.basename(path) and '.' in os.path.basename(path) else path
         if directory and not os.path.exists(directory):
             os.makedirs(directory)
             self.log_print(f"  Created directory: {directory}")
 
+    # MODIFIED: New helper method for extracting zip and setting permissions
+    def _extract_and_permission_launcher(self, zip_path, extract_folder):
+        """Extracts the launcher.zip and sets permissions on launcher.sh."""
+        self.log_print(f"  Processing '{os.path.basename(zip_path)}'...")
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                self.log_print(f"  Extracting all contents from '{os.path.basename(zip_path)}'...")
+                zip_ref.extractall(extract_folder)
+                self.log_print(f"  Successfully extracted to '{extract_folder}'.")
+
+            # Set execute permissions on the extracted launcher.sh
+            extracted_sh_path = os.path.join(extract_folder, "launcher.sh")
+            if os.path.exists(extracted_sh_path):
+                st = os.stat(extracted_sh_path)
+                # Sets permissions to rwxr-xr-x (read/write/execute for owner, read/execute for group/others)
+                os.chmod(extracted_sh_path, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+                self.log_print(f"  Set execute permissions for 'launcher.sh'.\n")
+            else:
+                self.log_print(f"  WARNING: 'launcher.sh' not found after extraction. Check the contents of the zip file.\n", is_stderr=True)
+        
+        except zipfile.BadZipFile:
+            self.log_print(f"  ERROR: '{os.path.basename(zip_path)}' is not a valid zip file.\n", is_stderr=True)
+        except Exception as e:
+            self.log_print(f"  ERROR processing launcher zip: {e}\n", is_stderr=True)
+
+
+    # MODIFIED: Rewritten to handle zip extraction
     def _download_and_compare_file(self, display_name, filename, download_url, local_target_folder):
         local_full_path = os.path.join(local_target_folder, filename)
         temp_file_path = local_full_path + ".tmp"
@@ -699,27 +722,43 @@ class AdVideoApp:
             response = requests.get(download_url, stream=True)
             response.raise_for_status()
 
-            self._ensure_dir(local_full_path)  
+            self._ensure_dir(local_full_path)
 
             with open(temp_file_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
 
-            if os.path.exists(local_full_path):
-                if filecmp.cmp(local_full_path, temp_file_path, shallow=False):
-                    self.log_print(f"  '{filename}' is already up to date. No action needed.\n")
-                    os.remove(temp_file_path)
-                    return "skipped"
+            status = ""
+            # Check if the downloaded file is identical to the local one
+            if os.path.exists(local_full_path) and filecmp.cmp(local_full_path, temp_file_path, shallow=False):
+                self.log_print(f"  '{filename}' is already up to date. No action needed.")
+                os.remove(temp_file_path)
+                # EVEN IF SKIPPED: For Mac launcher, ensure it's extracted and executable.
+                if filename == "launcher.zip" and sys.platform == "darwin":
+                    self._extract_and_permission_launcher(local_full_path, local_target_folder)
                 else:
-                    self.log_print(f"  New version of '{filename}' found. Updating...")
-                    shutil.move(temp_file_path, local_full_path)
-                    self.log_print(f"  '{filename}' updated successfully!\n")
-                    return "updated"
+                    self.log_print("\n")
+                return "skipped"
+            
+            # If new or updated, replace the local file
+            if os.path.exists(local_full_path):
+                self.log_print(f"  New version of '{filename}' found. Updating...")
+                status = "updated"
             else:
-                self.log_print(f"  '{filename}' not found locally. Downloading new script...")
-                shutil.move(temp_file_path, local_full_path)
-                self.log_print(f"  '{filename}' downloaded successfully!\n")
-                return "downloaded"
+                self.log_print(f"  '{filename}' not found locally. Downloading new file...")
+                status = "downloaded"
+
+            shutil.move(temp_file_path, local_full_path)
+            self.log_print(f"  '{filename}' {status} successfully!")
+
+            # If it's the Mac launcher zip, extract it and set permissions.
+            if filename == "launcher.zip" and sys.platform == "darwin":
+                self._extract_and_permission_launcher(local_full_path, local_target_folder)
+            else:
+                # Keep consistent spacing for other files
+                self.log_print("\n")
+
+            return status
 
         except requests.exceptions.RequestException as e:
             self.log_print(f"  ERROR downloading '{filename}' from '{download_url}': {e}\n", is_stderr=True)
@@ -746,15 +785,28 @@ class AdVideoApp:
             downloaded_count = 0
             skipped_count = 0
             error_count = 0
-            # Flag to check if a restart is needed
-            launcher_or_reqs_updated = False 
+            launcher_or_reqs_updated = False
 
-            # Unified loop to check all files defined in the constants
-            files_to_check = {
-                k: v for k, v in SCRIPT_FILENAMES.items() if v in GITHUB_SCRIPT_URLS
-            }
+            # --- MODIFIED: Platform-aware file checking for .zip on Mac ---
+            files_to_check = {}
+            for display_name, filename in SCRIPT_FILENAMES.items():
+                is_launcher = "launcher" in filename.lower()
+                # If it's not a launcher, always add it
+                if not is_launcher:
+                    files_to_check[display_name] = filename
+                # If it's a launcher, check the platform
+                else:
+                    if sys.platform == "win32" and filename.endswith(".bat"):
+                        files_to_check[display_name] = filename
+                    elif sys.platform == "darwin" and filename.endswith(".zip"): # MODIFIED
+                        files_to_check[display_name] = filename
+            
+            self.log_print(f"Platform '{sys.platform}' detected. Checking relevant files...\n")
 
             for display_name, filename in files_to_check.items():
+                if filename not in GITHUB_SCRIPT_URLS:
+                    continue
+                
                 github_url = GITHUB_SCRIPT_URLS[filename]
                 status = self._download_and_compare_file(display_name, filename, github_url, scripts_folder)
                 
@@ -764,8 +816,8 @@ class AdVideoApp:
                     else: # downloaded
                         downloaded_count += 1
                     
-                    # Check if the updated file requires a restart
-                    if filename in ["launcher.bat"]:
+                    # --- MODIFIED: Check for launcher zip file ---
+                    if filename in ["launcher.bat", "launcher.zip"]:
                         launcher_or_reqs_updated = True
                 
                 elif status == "skipped":
@@ -797,91 +849,88 @@ class AdVideoApp:
             self._save_configuration()
 
     def _check_for_gui_update(self):
-            """Checks for a new version of the GUI script and updates/restarts if available."""
-            self.log_print("\n--- Checking for GUI script update ---")
-            local_gui_path = os.path.abspath(sys.argv[0])
-            github_url = GITHUB_SCRIPT_URLS.get(GUI_SCRIPT_FILENAME)
+        """Checks for a new version of the GUI script and updates/restarts if available."""
+        self.log_print("\n--- Checking for GUI script update ---")
+        local_gui_path = os.path.abspath(sys.argv[0])
+        github_url = GITHUB_SCRIPT_URLS.get(GUI_SCRIPT_FILENAME)
+        
+        if not github_url:
+            self.log_print("Error: GUI script URL not found in configuration.", is_stderr=True)
+            messagebox.showerror("Update Error", "GUI script URL not configured.")
+            return
+
+        temp_download_path = local_gui_path + ".new_version_tmp"
+
+        try:
+            self.log_print(f"Downloading latest GUI from: {github_url}")
+            response = requests.get(github_url, stream=True)
+            response.raise_for_status()
+
+            downloaded_content = response.content
+            with open(temp_download_path, 'wb') as f:
+                f.write(downloaded_content)
             
-            if not github_url:
-                self.log_print("Error: GUI script URL not found in configuration.", is_stderr=True)
-                messagebox.showerror("Update Error", "GUI script URL not configured.")
-                return
-
-            temp_download_path = local_gui_path + ".new_version_tmp"
-
-            try:
-                self.log_print(f"Downloading latest GUI from: {github_url}")
-                response = requests.get(github_url, stream=True)
-                response.raise_for_status()
-
-                # Read content from the response and write it to a temporary file
-                downloaded_content = response.content
-                with open(temp_download_path, 'wb') as f:
-                    f.write(downloaded_content)
+            gui_updated = False
+            if os.path.exists(local_gui_path):
+                with open(local_gui_path, 'rb') as f:
+                    local_content = f.read()
                 
-                # If the local file exists, compare its content with the downloaded content
-                gui_updated = False
-                if os.path.exists(local_gui_path):
-                    # You can read the local file content and compare
-                    with open(local_gui_path, 'rb') as f:
-                        local_content = f.read()
-                    
-                    # Check for content equality directly
-                    if local_content == downloaded_content:
-                        self.log_print("GUI script is already up to date. No update needed.\n")
-                        messagebox.showinfo("Update Check", "The GUI is already up to date!")
-                    else:
-                        self.log_print("New version of GUI script found. Applying update...")
-                        shutil.copy(temp_download_path, local_gui_path)
-                        gui_updated = True
+                if local_content == downloaded_content:
+                    self.log_print("GUI script is already up to date. No update needed.\n")
+                    messagebox.showinfo("Update Check", "The GUI is already up to date!")
                 else:
-                    # Local file doesn't exist, so it's a new download
-                    self.log_print("GUI script not found locally. Downloading new script...")
+                    self.log_print("New version of GUI script found. Applying update...")
                     shutil.copy(temp_download_path, local_gui_path)
                     gui_updated = True
+            else:
+                self.log_print("GUI script not found locally. Downloading new script...")
+                shutil.copy(temp_download_path, local_gui_path)
+                gui_updated = True
 
-                if gui_updated:
-                    # Marker file for successful update and restart
-                    with open(UPDATE_IN_PROGRESS_MARKER, 'w') as f:
-                        f.write(str(os.getpid()))
+            if gui_updated:
+                with open(UPDATE_IN_PROGRESS_MARKER, 'w') as f:
+                    f.write(str(os.getpid()))
 
-                    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    self.gui_last_update_timestamp.set(f"Last GUI update: {current_time}")
-                    self._save_configuration()
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.gui_last_update_timestamp.set(f"Last GUI update: {current_time}")
+                self._save_configuration()
 
-                    self.log_print("GUI script updated successfully. Restarting application...\n")
-                    messagebox.showinfo("Update Complete", "The GUI has been updated. The application will now restart to apply changes.")
-                    
-                    self._restarting_for_update = True
-                    python = sys.executable
-                    os.execl(python, python, *sys.argv)
+                self.log_print("GUI script updated successfully. Restarting application...\n")
+                messagebox.showinfo("Update Complete", "The GUI has been updated. The application will now restart to apply changes.")
                 
-            except requests.exceptions.RequestException as e:
-                self.log_print(f"Error checking/downloading GUI update: {e}\n", is_stderr=True)
-                messagebox.showerror("Update Error", f"Failed to check for GUI update: {e}")
-            except Exception as e:
-                self.log_print(f"An unexpected error occurred during GUI update: {e}\n", is_stderr=True)
-                messagebox.showerror("Update Error", f"An unexpected error occurred: {e}")
-            finally:
-                # Always clean up the temporary file
-                if os.path.exists(temp_download_path):
-                    try:
+                try:
+                    if os.path.exists(temp_download_path):
                         os.remove(temp_download_path)
-                    except Exception as e:
-                        self.log_print(f"Warning: Could not remove temporary download file: {e}", is_stderr=True)
+                        self.log_print(f"Cleaned up temporary file: {temp_download_path}\n")
+                except Exception as e:
+                    self.log_print(f"Warning: Could not remove temporary download file before restart: {e}", is_stderr=True)
 
-    # --- This method was missing and caused the AttributeError ---
+                self._restarting_for_update = True
+                python = sys.executable
+                os.execl(python, python, *sys.argv)
+            
+        except requests.exceptions.RequestException as e:
+            self.log_print(f"Error checking/downloading GUI update: {e}\n", is_stderr=True)
+            messagebox.showerror("Update Error", f"Failed to check for GUI update: {e}")
+        except Exception as e:
+            self.log_print(f"An unexpected error occurred during GUI update: {e}\n", is_stderr=True)
+            messagebox.showerror("Update Error", f"An unexpected error occurred: {e}")
+        finally:
+            if os.path.exists(temp_download_path):
+                try:
+                    os.remove(temp_download_path)
+                except Exception as e:
+                    self.log_print(f"Warning: Could not remove temporary download file: {e}", is_stderr=True)
+
     def _handle_startup_update_check(self):
         """Checks for and cleans up the update marker file on startup."""
         if os.path.exists(UPDATE_IN_PROGRESS_MARKER):
             try:
                 os.remove(UPDATE_IN_PROGRESS_MARKER)
-            
-                self.log_print("GUI update completed successfully. Welcome back!", 'success')
+                self.log_print("GUI update completed successfully. Welcome back!\n", 'success')
             except Exception as e:
-                self.log_print(f"Warning: Could not remove update marker file: {e}", is_stderr=True)
+                self.log_print(f"Warning: Could not remove update marker file: {e}\n", is_stderr=True)
 
-    # --- Video Renamer Script function ---
     def _run_video_renamer_script(self):
         spreadsheet_path = self.video_renamer_spreadsheet_path.get()
         folder_path = self.video_renamer_folder_path.get()
@@ -930,12 +979,10 @@ class AdVideoApp:
                            initial_progress_text="Renaming videos...")
 
 
-    # --- Bynder Video Metadata Export Script function ---
     def _run_bynder_video_metadata_export(self):
         spreadsheet_path = self.bynder_video_metadata_spreadsheet_path.get()
         folder_path = self.bynder_video_metadata_folder_path.get()
         
-        # Get values from new UI input fields
         wrike_link = self.link_to_wrike_project_ui.get().strip()
         year = self.year_ui.get().strip()
         sub_initiative = self.sub_initiative_ui.get().strip()
@@ -955,10 +1002,6 @@ class AdVideoApp:
             messagebox.showerror("Input Error", "Please select a valid Folder of Renamed Assets (Videos).")
             return
         
-        # --- Removed required field checks for Link to Wrike Project, Year, Sub-Initiative, and Location Type ---
-        # The script will now pass empty strings if the UI fields are empty, allowing the backend script
-        # to fall back to spreadsheet values as designed.
-
         self.log_print(f"\n--- Running Bynder Video Metadata Export Script ({script_name}) ---")
         self.log_print(f"Spreadsheet: {spreadsheet_path}")
         self.log_print(f"Assets Folder: {folder_path}")
@@ -969,7 +1012,6 @@ class AdVideoApp:
             "--assets_folder", folder_path,
         ]
         
-        # Only add arguments if they have a non-empty value from the UI
         if wrike_link:
             args.extend(["--wrike_link", wrike_link])
         if year:
@@ -1003,10 +1045,7 @@ class AdVideoApp:
 
 
     def _setup_initial_state(self):
-        """
-        Sets up the initial state of the GUI elements.
-        This is called after loading configuration to ensure correct visibility.
-        """
+        """Sets up the initial state of the GUI elements."""
         if not self.log_expanded:  
             self.log_text.pack_forget()  
             self.toggle_log_button.config(text="▲")  
@@ -1058,7 +1097,7 @@ class AdVideoApp:
         self.theme_label.pack(side="left", padx=(0, 5))
         
         self.theme_selector = ttk.Combobox(theme_frame, textvariable=self.current_theme,  
-                                         values=["Light", "Dark"], state="readonly", width=6)
+                                           values=["Light", "Dark"], state="readonly", width=6)
         self.theme_selector.pack(side="left")
         self.theme_selector.bind("<<ComboboxSelected>>", self._on_theme_change)
         
@@ -1094,10 +1133,9 @@ class AdVideoApp:
 
         self.canvas.bind_all("<MouseWheel>", _on_mouse_wheel)
 
-
         row_counter = 0  
 
-        # SECTION: Local Scripts Folder Path (always needed)
+        # SECTION: Local Scripts Folder Path
         scripts_folder_wrapper_frame = ttk.Frame(self.scrollable_frame, style='SectionFrame.TFrame')
         scripts_folder_wrapper_frame.grid(row=row_counter, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
         row_counter += 1
@@ -1118,7 +1156,7 @@ class AdVideoApp:
         ttk.Entry(scripts_folder_frame, textvariable=self.scripts_root_folder, width=40, style='TEntry').grid(row=0, column=1, padx=5, pady=5, sticky="ew")
         ttk.Button(scripts_folder_frame, text="Browse", command=self._browse_scripts_root_folder, style='TButton').grid(row=0, column=2, padx=5, pady=5)
 
-        # --- NEW SECTION: Video Renamer Tool ---
+        # SECTION: Video Renamer Tool
         video_renamer_wrapper_frame = ttk.Frame(self.scrollable_frame, style='SectionFrame.TFrame')
         video_renamer_wrapper_frame.grid(row=row_counter, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
         row_counter += 1
@@ -1164,7 +1202,7 @@ class AdVideoApp:
 
         row_counter += 1
 
-        # --- NEW SECTION: Bynder Video Metadata Prep ---
+        # SECTION: Bynder Video Metadata Prep
         bynder_video_metadata_wrapper_frame = ttk.Frame(self.scrollable_frame, style='SectionFrame.TFrame')
         bynder_video_metadata_wrapper_frame.grid(row=row_counter, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
         row_counter += 1
@@ -1181,7 +1219,6 @@ class AdVideoApp:
         bynder_video_metadata_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         bynder_video_metadata_frame.grid_columnconfigure(1, weight=1)
 
-        # Spreadsheet and Folder inputs
         ttk.Label(bynder_video_metadata_frame, text="Spreadsheet:", style='TLabel').grid(row=0, column=0, padx=5, pady=5, sticky="w")
         ttk.Entry(bynder_video_metadata_frame, textvariable=self.bynder_video_metadata_spreadsheet_path, width=45, style='TEntry').grid(row=0, column=1, padx=5, pady=5, sticky="ew")
         ttk.Button(bynder_video_metadata_frame, text="Browse File", command=lambda: self._browse_file(self.bynder_video_metadata_spreadsheet_path, "spreadsheet"), style='TButton').grid(row=0, column=2, padx=5, pady=5)
@@ -1190,7 +1227,6 @@ class AdVideoApp:
         ttk.Entry(bynder_video_metadata_frame, textvariable=self.bynder_video_metadata_folder_path, width=45, style='TEntry').grid(row=1, column=1, padx=5, pady=5, sticky="ew")
         ttk.Button(bynder_video_metadata_frame, text="Browse Folder", command=lambda: self._browse_folder(self.bynder_video_metadata_folder_path), style='TButton').grid(row=1, column=2, padx=5, pady=5)
 
-        # --- NEW UI Elements for additional metadata fields ---
         ttk.Label(bynder_video_metadata_frame, text="Link to Wrike Project:", style='TLabel').grid(row=2, column=0, padx=5, pady=5, sticky="w")
         ttk.Entry(bynder_video_metadata_frame, textvariable=self.link_to_wrike_project_ui, width=45, style='TEntry').grid(row=2, column=1, padx=5, pady=5, sticky="ew", columnspan=2)
         Tooltip(bynder_video_metadata_frame.winfo_children()[-1], "Enter a Wrike project link to apply to all assets. If left blank, the script will attempt to use the value from the spreadsheet, if available.", self.secondary_bg, self.text_color)
@@ -1209,9 +1245,8 @@ class AdVideoApp:
         location_type_combobox.grid(row=5, column=1, padx=5, pady=5, sticky="w", columnspan=2)
         Tooltip(location_type_combobox, "Select the Location Type to apply to all assets. If left blank, the script will attempt to use the value from the spreadsheet, if available.", self.secondary_bg, self.text_color)
 
-        # Run button and progress bar
         self.bynder_video_metadata_export_run_control_frame = ttk.Frame(bynder_video_metadata_frame, style='TFrame')
-        self.bynder_video_metadata_export_run_control_frame.grid(row=6, column=0, columnspan=3, pady=10, sticky="ew") # Adjusted row
+        self.bynder_video_metadata_export_run_control_frame.grid(row=6, column=0, columnspan=3, pady=10, sticky="ew")
         self.bynder_video_metadata_export_run_control_frame.grid_columnconfigure(0, weight=1)
         self.bynder_video_metadata_export_run_control_frame.grid_columnconfigure(1, weight=0)
         self.bynder_video_metadata_export_run_control_frame.grid_columnconfigure(2, weight=1)
@@ -1246,12 +1281,12 @@ class AdVideoApp:
 
 
         self.log_text = scrolledtext.ScrolledText(self.log_wrapper_frame, width=90, height=15,  
-                                                 font=self.log_font, state='disabled',
-                                                 bg=self.log_bg, fg=self.log_text_color,
-                                                 insertbackground=self.log_text_color,  
-                                                 selectbackground=self.accent_color,  
-                                                 selectforeground=self.RF_WHITE_BASE,  
-                                                 relief="solid", borderwidth=1)
+                                                  font=self.log_font, state='disabled',
+                                                  bg=self.log_bg, fg=self.log_text_color,
+                                                  insertbackground=self.log_text_color,  
+                                                  selectbackground=self.accent_color,  
+                                                  selectforeground=self.RF_WHITE_BASE,  
+                                                  relief="solid", borderwidth=1)
         self.log_text.pack(padx=10, pady=(0, 10), fill="both", expand=True)  
 
         if not self.log_expanded:  
