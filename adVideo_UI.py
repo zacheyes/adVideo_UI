@@ -685,7 +685,7 @@ class AdVideoApp:
 
     # MODIFIED: New helper method for extracting zip and setting permissions
     def _extract_and_permission_launcher(self, zip_path, extract_folder):
-        """Extracts the launcher.zip and sets permissions on launcher.sh."""
+        """Extracts the launcher.zip and sets permissions on launcher.command."""
         self.log_print(f"  Processing '{os.path.basename(zip_path)}'...")
         try:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
@@ -693,15 +693,15 @@ class AdVideoApp:
                 zip_ref.extractall(extract_folder)
                 self.log_print(f"  Successfully extracted to '{extract_folder}'.")
 
-            # Set execute permissions on the extracted launcher.sh
-            extracted_sh_path = os.path.join(extract_folder, "launcher.sh")
+            # Set execute permissions on the extracted launcher.command
+            extracted_sh_path = os.path.join(extract_folder, "launcher.command")
             if os.path.exists(extracted_sh_path):
                 st = os.stat(extracted_sh_path)
                 # Sets permissions to rwxr-xr-x (read/write/execute for owner, read/execute for group/others)
                 os.chmod(extracted_sh_path, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-                self.log_print(f"  Set execute permissions for 'launcher.sh'.\n")
+                self.log_print(f"  Set execute permissions for 'launcher.command'.\n")
             else:
-                self.log_print(f"  WARNING: 'launcher.sh' not found after extraction. Check the contents of the zip file.\n", is_stderr=True)
+                self.log_print(f"  WARNING: 'launcher.command' not found after extraction. Check the contents of the zip file.\n", is_stderr=True)
         
         except zipfile.BadZipFile:
             self.log_print(f"  ERROR: '{os.path.basename(zip_path)}' is not a valid zip file.\n", is_stderr=True)
