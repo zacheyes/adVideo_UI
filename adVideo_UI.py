@@ -29,6 +29,7 @@ UPDATE_IN_PROGRESS_MARKER = "adVideo_ui_update_in_progress.tmp"
 SCRIPT_FILENAMES = {
     "Video Renamer Script": "adVideo_renamer.py",
     "Bynder Video Metadata Export Script": "adVideo_metadataPrep.py",
+    "Launcher": "launcher.bat",
 }
 
 # GitHub URLs for Python scripts (only for the relevant ones)
@@ -36,6 +37,7 @@ GITHUB_SCRIPT_URLS = {
     GUI_SCRIPT_FILENAME: GITHUB_RAW_BASE_URL + GUI_SCRIPT_FILENAME,
     "adVideo_renamer.py": GITHUB_RAW_BASE_URL + "adVideo_renamer.py",
     "adVideo_metadataPrep.py": GITHUB_RAW_BASE_URL + "adVideo_metadataPrep.py",
+    "launcher.bat": GITHUB_RAW_BASE_URL + "launcher.bat",
 }
 
 # Use a specific config file for this video UI to avoid conflicts with the larger GUI
@@ -731,64 +733,68 @@ class AdVideoApp:
             return "error"
 
     def _update_all_scripts(self):
-        scripts_folder = self.scripts_root_folder.get()
-        if not scripts_folder or not os.path.isdir(scripts_folder):
-            messagebox.showerror("Error", "Please set a valid 'Local Scripts Folder' first.")
-            self.log_print("Script update aborted: 'Local Scripts Folder' is not set or invalid.\n", is_stderr=True)
-            return
+            scripts_folder = self.scripts_root_folder.get()
+            if not scripts_folder or not os.path.isdir(scripts_folder):
+                messagebox.showerror("Error", "Please set a valid 'Local Scripts Folder' first.")
+                self.log_print("Update aborted: 'Local Scripts Folder' is not set or invalid.\n", is_stderr=True)
+                return
 
-        self.log_print("\n--- Starting All Scripts Update Process ---")
-        self.log_print(f"Using scripts root folder: {scripts_folder}\n")
+            self.log_print("\n--- Starting All Scripts & Files Update Process ---")
+            self.log_print(f"Using root folder: {scripts_folder}\n")
 
-        updated_count = 0
-        downloaded_count = 0
-        skipped_count = 0
-        error_count = 0
-        total_checked = 0
+            updated_count = 0
+            downloaded_count = 0
+            skipped_count = 0
+            error_count = 0
+            # Flag to check if a restart is needed
+            launcher_or_reqs_updated = False 
 
-        # Phase 1: Update Python scripts
-        self.log_print("\n--- Phase 1: Updating Python scripts ---")
-        for display_name, filename in SCRIPT_FILENAMES.items():
-            if filename.endswith(".py") and filename in GITHUB_SCRIPT_URLS:
-                total_checked += 1
+            # Unified loop to check all files defined in the constants
+            files_to_check = {
+                k: v for k, v in SCRIPT_FILENAMES.items() if v in GITHUB_SCRIPT_URLS
+            }
+
+            for display_name, filename in files_to_check.items():
                 github_url = GITHUB_SCRIPT_URLS[filename]
-                
                 status = self._download_and_compare_file(display_name, filename, github_url, scripts_folder)
                 
-                if status == "updated":
-                    updated_count += 1
-                elif status == "downloaded":
-                    downloaded_count += 1
+                if status in ["updated", "downloaded"]:
+                    if status == "updated":
+                        updated_count += 1
+                    else: # downloaded
+                        downloaded_count += 1
+                    
+                    # Check if the updated file requires a restart
+                    if filename in ["launcher.bat"]:
+                        launcher_or_reqs_updated = True
+                
                 elif status == "skipped":
                     skipped_count += 1
                 elif status == "error":
                     error_count += 1
-        
-        self.log_print("\n--- Phase 1 Complete ---")
-        self.log_print(f"Python scripts: Updated={updated_count}, Downloaded={downloaded_count}, Skipped={skipped_count}, Errors={error_count}\n")
-
-
-        self.log_print("\n--- All Update Processes Complete ---")
-        
-        summary_message_parts = []
-        if updated_count > 0:
-            summary_message_parts.append(f"Updated {updated_count} script(s).")
-        if downloaded_count > 0:
-            summary_message_parts.append(f"Newly downloaded {downloaded_count} item(s) (scripts).")
-        if skipped_count > 0:
-            summary_message_parts.append(f"{skipped_count} item(s) were already up to date.")
-        if error_count > 0:
-            summary_message_parts.append(f"{error_count} item(s) encountered errors. Check log for details.")
-
-        if summary_message_parts:
-            summary_message = "\n".join(summary_message_parts)
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  
-            self.last_update_timestamp.set(f"Last update: {current_time}")  
-            messagebox.showinfo("Update Complete", f"Update summary:\n{summary_message}\n\nCheck the Activity Log for full details.")
-        else:
-            messagebox.showinfo("Update Complete", "No updates found, or no items to check. All local items are up to date.")
             
-        self._save_configuration()
+            self.log_print("\n--- All Update Processes Complete ---")
+            
+            summary_message_parts = []
+            if updated_count > 0:
+                summary_message_parts.append(f"Updated {updated_count} file(s).")
+            if downloaded_count > 0:
+                summary_message_parts.append(f"Newly downloaded {downloaded_count} file(s).")
+            
+            final_message = "Update process finished."
+            if summary_message_parts:
+                final_message += "\n\n" + "\n".join(summary_message_parts)
+            elif error_count == 0:
+                final_message = "All local files are already up to date."
+
+            if error_count > 0:
+                final_message += f"\n\nEncountered {error_count} error(s). Please check the log."
+
+            messagebox.showinfo("Update Complete", final_message)
+            
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.last_update_timestamp.set(f"Last update: {current_time}")
+            self._save_configuration()
 
     def _check_for_gui_update(self):
             """Checks for a new version of the GUI script and updates/restarts if available."""
