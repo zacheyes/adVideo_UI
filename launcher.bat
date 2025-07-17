@@ -2,7 +2,6 @@
 setlocal
 
 :: --- Configuration ---
-set REQUIREMENTS_FILE=requirements.txt
 set PYTHON_SCRIPT=adVideo_UI.py
 
 title Ad Video Tool Launcher
@@ -16,9 +15,9 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
-:: --- 2. Install packages directly to the main Python installation ---
-echo Installing required packages...
-pip install -r "%REQUIREMENTS_FILE%" --upgrade --quiet --disable-pip-version-check
+:: --- 2. Install required packages directly ---
+echo Installing required packages (if missing)...
+pip install pandas openpyxl requests --upgrade --quiet --disable-pip-version-check
 
 :: --- 3. Launch the UI and Exit ---
 echo Launching the Ad Video Tool...
